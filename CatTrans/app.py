@@ -162,17 +162,62 @@ def make_api_request(url):
         return None
 
 def get_weather_location():
-    """使用ipinfo.io API获取当前位置"""
+    """使用多个API获取当前位置，提高定位准确性"""
+    # 首先尝试ipinfo.io
     try:
         url = "https://ipinfo.io/json"
         data = make_api_request(url)
         
         if data and 'city' in data:
-            return data.get('city', '未知城市')
+            city = data.get('city', '未知城市')
+            region = data.get('region', '')
+            country = data.get('country', '')
+            
+            # 如果城市信息不详细，尝试使用region
+            if not city or city == '未知城市':
+                city = region if region else '未知城市'
+            
+            # 如果还是没有，使用country
+            if not city or city == '未知城市':
+                city = country if country else '未知城市'
+            
+            # 如果定位到的是服务器位置（如The Dalles），尝试备用API
+            if city in ['The Dalles', 'Unknown', '未知城市']:
+                return get_weather_location_backup()
+                
+            return city
         else:
-            return None
-    except:
-        return None
+            return get_weather_location_backup()
+    except Exception as e:
+        st.error(f"获取位置失败: {e}")
+        return get_weather_location_backup()
+
+def get_weather_location_backup():
+    """备用定位API"""
+    try:
+        # 使用ip-api.com作为备用
+        url = "http://ip-api.com/json/"
+        data = make_api_request(url)
+        
+        if data and 'city' in data and data['status'] == 'success':
+            city = data.get('city', '未知城市')
+            region = data.get('regionName', '')
+            country = data.get('country', '')
+            
+            # 优先使用城市，其次是地区，最后是国家
+            if city and city not in ['The Dalles', 'Unknown']:
+                return city
+            elif region and region not in ['The Dalles', 'Unknown']:
+                return region
+            elif country and country not in ['The Dalles', 'Unknown']:
+                return country
+            else:
+                return "北京"  # 最后的备用选项
+        else:
+            return "北京"  # 默认城市
+    except Exception as e:
+        st.warning(f"备用定位也失败，使用默认城市: {e}")
+        return "北京"  # 默认城市
 
 def get_weather_data(city_name):
     """一次性获取所有天气数据，避免重复API调用"""
@@ -634,63 +679,58 @@ else:
         st.markdown("<br>", unsafe_allow_html=True)  # 添加一些垂直间距
         refresh_weather = st.button("🔄 定位并刷新", use_container_width=True)
     
-    # 获取天气数据
-    should_refresh = refresh_weather or 'weather_data' not in st.session_state
+    # 获取天气数据 - 使用更安全的方式
+    refresh_triggered = refresh_weather
     
-    # 检查是否需要刷新（页面切换时自动刷新）
+    # 页面切换检测
     if page == "🌤️ 天气预报":
-        # 每次进入天气预报页面都强制刷新
         if 'weather_data' not in st.session_state:
-            should_refresh = True
+            refresh_triggered = True
         elif 'last_page' in st.session_state and st.session_state.last_page != "🌤️ 天气预报":
-            # 从其他页面（如作物推荐）切换过来，强制刷新
-            should_refresh = True
-            # 清除旧数据确保重新获取
-            if 'weather_data' in st.session_state:
-                del st.session_state.weather_data
+            refresh_triggered = True
     
-    # 记录当前页面（在检查之后）
+    # 记录当前页面
     st.session_state.last_page = page
     
-    if should_refresh:
+    # 城市变更检测
+    city_changed = False
+    if 'weather_data' in st.session_state and selected_city != st.session_state.weather_data.get('city', ''):
+        city_changed = True
+    
+    # 执行天气数据获取
+    if refresh_triggered or city_changed:
         with st.spinner('🌍 正在获取位置和天气信息...'):
-            # 自动定位
-            current_city = get_weather_location()
-            if current_city:
-                st.success(f"自动定位成功：{current_city}")
+            if refresh_triggered and not city_changed:
+                # 自动定位
+                current_city = get_weather_location()
+                if current_city:
+                    st.success(f"自动定位成功：{current_city}")
+                else:
+                    st.warning("自动定位失败，使用选择城市")
+                    current_city = selected_city
             else:
-                st.warning("自动定位失败，使用选择城市")
+                # 使用选择的城市
                 current_city = selected_city
             
             if current_city:
-                # 一次性获取所有天气数据
+                # 获取天气数据
                 current_weather, weather_indices, weekly_forecast = get_weather_data(current_city)
                 
-                # 存储到session state
-                st.session_state.weather_data = {
+                # 安全地更新session state
+                new_weather_data = {
                     'city': current_city,
                     'current': current_weather,
                     'indices': weather_indices,
                     'forecast': weekly_forecast,
                     'last_update': datetime.now()
                 }
+                
+                # 一次性更新，避免多次DOM操作
+                st.session_state.weather_data = new_weather_data
             else:
                 st.error("❌ 无法获取天气信息，请检查网络连接")
-                st.session_state.weather_data = None
-    elif selected_city != st.session_state.weather_data.get('city', '') and st.session_state.weather_data:
-        # 如果选择了不同的城市，更新天气数据
-        with st.spinner('🌍 正在获取天气信息...'):
-            current_city = selected_city
-            # 一次性获取所有天气数据
-            current_weather, weather_indices, weekly_forecast = get_weather_data(current_city)
-            
-            st.session_state.weather_data = {
-                'city': current_city,
-                'current': current_weather,
-                'indices': weather_indices,
-                'forecast': weekly_forecast,
-                'last_update': datetime.now()
-            }
+                if 'weather_data' in st.session_state:
+                    del st.session_state.weather_data
     
     # 显示天气信息
     if st.session_state.weather_data:
