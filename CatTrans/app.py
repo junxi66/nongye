@@ -111,48 +111,36 @@ def load_models():
         transformer_path = os.path.join(current_dir, 'transformer_model.pth')
         encoder_path = os.path.join(current_dir, 'label_encoder.pkl')
         
-        # 调试信息
-        st.write(f"🔍 当前工作目录: {os.getcwd()}")
-        st.write(f"🔍 脚本目录: {current_dir}")
-        st.write(f"🔍 查找CatBoost模型: {catboost_path}")
-        st.write(f"🔍 查找Transformer模型: {transformer_path}")
-        st.write(f"🔍 查找标签编码器: {encoder_path}")
-        
         # 检查文件是否存在
         if not os.path.exists(catboost_path):
-            st.error(f"❌ CatBoost模型文件不存在：{catboost_path}")
             # 尝试在当前目录查找
             if os.path.exists('catboost_model.pkl'):
-                st.write("✅ 在当前目录找到CatBoost模型")
                 catboost_path = 'catboost_model.pkl'
             else:
+                st.error("❌ CatBoost模型文件不存在")
                 return None, None, None
                 
         if not os.path.exists(transformer_path):
-            st.error(f"❌ Transformer模型文件不存在：{transformer_path}")
             # 尝试在当前目录查找
             if os.path.exists('transformer_model.pth'):
-                st.write("✅ 在当前目录找到Transformer模型")
                 transformer_path = 'transformer_model.pth'
             else:
+                st.error("❌ Transformer模型文件不存在")
                 return None, None, None
                 
         if not os.path.exists(encoder_path):
-            st.error(f"❌ 标签编码器文件不存在：{encoder_path}")
             # 尝试在当前目录查找
             if os.path.exists('label_encoder.pkl'):
-                st.write("✅ 在当前目录找到标签编码器")
                 encoder_path = 'label_encoder.pkl'
             else:
+                st.error("❌ 标签编码器文件不存在")
                 return None, None, None
         
         # 加载CatBoost模型
         catboost_model = joblib.load(catboost_path)
-        st.success("✅ CatBoost模型加载成功")
 
         # 加载标签编码器
         label_encoder = joblib.load(encoder_path)
-        st.success("✅ 标签编码器加载成功")
 
         # 加载Transformer模型
         transformer_model = OptimizedTransformerClassifier(
@@ -162,14 +150,11 @@ def load_models():
         )
         transformer_model.load_state_dict(torch.load(transformer_path, map_location='cpu'))
         transformer_model.eval()
-        st.success("✅ Transformer模型加载成功")
 
         return catboost_model, transformer_model, label_encoder
         
     except Exception as e:
         st.error(f"❌ 模型加载失败: {str(e)}")
-        st.write(f"🔍 错误详情: {type(e).__name__}")
-        st.info("请检查模型文件是否完整或重新上传")
         return None, None, None
 
 
@@ -220,20 +205,28 @@ def get_weather_location():
         data = make_api_request(url)
         
         if data and 'city' in data:
-            city = data.get('city', '未知城市')
-            region = data.get('region', '')
-            country = data.get('country', '')
+            city = data.get('city', '').strip()
+            region = data.get('region', '').strip()
+            country = data.get('country', '').strip()
             
-            # 如果城市信息不详细，尝试使用region
-            if not city or city == '未知城市':
-                city = region if region else '未知城市'
+            # 严格过滤无效的地理位置
+            invalid_locations = [
+                'The Dalles', 'Oregon', 'Washington', 'California', 'Unknown', 
+                '未知城市', '', 'None', 'null', 'N/A', 'Server', 'Cloud',
+                'AWS', 'Google', 'Microsoft', 'Azure', 'Digital Ocean'
+            ]
             
-            # 如果还是没有，使用country
-            if not city or city == '未知城市':
-                city = country if country else '未知城市'
+            # 如果城市信息无效或过于宽泛，尝试使用region
+            if not city or city in invalid_locations or len(city) < 2:
+                if region and region not in invalid_locations and len(region) >= 2:
+                    city = region
+                elif country and country not in invalid_locations and len(country) >= 2:
+                    city = country
+                else:
+                    return get_weather_location_backup()
             
-            # 如果定位到的是服务器位置（如The Dalles），尝试备用API
-            if city in ['The Dalles', 'Unknown', '未知城市']:
+            # 再次检查最终结果
+            if city in invalid_locations or len(city) < 2:
                 return get_weather_location_backup()
                 
             return city
@@ -244,28 +237,63 @@ def get_weather_location():
         return get_weather_location_backup()
 
 def get_weather_location_backup():
-    """备用定位API"""
+    """备用定位API - 使用更可靠的服务"""
     try:
-        # 使用ip-api.com作为备用
-        url = "http://ip-api.com/json/"
-        data = make_api_request(url)
+        # 尝试多个备用API
+        apis = [
+            "http://ip-api.com/json/",
+            "https://ipapi.co/json/",
+            "https://api.ipgeolocation.io/ipgeo?apiKey=free"
+        ]
         
-        if data and 'city' in data and data['status'] == 'success':
-            city = data.get('city', '未知城市')
-            region = data.get('regionName', '')
-            country = data.get('country', '')
-            
-            # 优先使用城市，其次是地区，最后是国家
-            if city and city not in ['The Dalles', 'Unknown']:
-                return city
-            elif region and region not in ['The Dalles', 'Unknown']:
-                return region
-            elif country and country not in ['The Dalles', 'Unknown']:
-                return country
-            else:
-                return "北京"  # 最后的备用选项
-        else:
-            return "北京"  # 默认城市
+        for api_url in apis:
+            try:
+                data = make_api_request(api_url)
+                
+                if not data:
+                    continue
+                    
+                # ip-api.com格式
+                if 'status' in data and data['status'] == 'success':
+                    city = data.get('city', '').strip()
+                    region = data.get('regionName', '').strip()
+                    country = data.get('country', '').strip()
+                
+                # ipapi.co格式
+                elif 'city' in data and 'region' in data:
+                    city = data.get('city', '').strip()
+                    region = data.get('region', '').strip()
+                    country = data.get('country_name', '').strip()
+                
+                # ipgeolocation.io格式
+                elif 'city' in data and 'state_prov' in data:
+                    city = data.get('city', '').strip()
+                    region = data.get('state_prov', '').strip()
+                    country = data.get('country_name', '').strip()
+                else:
+                    continue
+                
+                # 严格过滤无效位置
+                invalid_locations = [
+                    'The Dalles', 'Oregon', 'Washington', 'California', 'Unknown',
+                    '未知城市', '', 'None', 'null', 'N/A', 'Server', 'Cloud'
+                ]
+                
+                # 优先使用城市，其次是地区，最后是国家
+                if city and city not in invalid_locations and len(city) >= 2:
+                    return city
+                elif region and region not in invalid_locations and len(region) >= 2:
+                    return region
+                elif country and country not in invalid_locations and len(country) >= 2:
+                    return country
+                
+            except Exception:
+                continue
+        
+        # 所有API都失败，返回默认城市
+        st.warning("所有定位API都失败，使用默认城市：北京")
+        return "北京"
+        
     except Exception as e:
         st.warning(f"备用定位也失败，使用默认城市: {e}")
         return "北京"  # 默认城市
@@ -753,15 +781,18 @@ else:
         with st.spinner('🌍 正在获取位置和天气信息...'):
             if refresh_triggered and not city_changed:
                 # 自动定位
+                st.write("🔍 开始自动定位...")
                 current_city = get_weather_location()
                 if current_city:
-                    st.success(f"自动定位成功：{current_city}")
+                    st.success(f"✅ 自动定位成功：{current_city}")
                 else:
-                    st.warning("自动定位失败，使用选择城市")
+                    st.warning("⚠️ 自动定位失败，使用选择城市")
                     current_city = selected_city
+                    st.info(f"📍 使用手动选择城市：{current_city}")
             else:
                 # 使用选择的城市
                 current_city = selected_city
+                st.info(f"📍 使用手动选择城市：{current_city}")
             
             if current_city:
                 # 获取天气数据
