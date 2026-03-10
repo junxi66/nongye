@@ -6,21 +6,6 @@ import pandas as pd
 import torch.nn as nn
 import requests
 from datetime import datetime
-import sys
-import os
-
-# 添加项目根目录到路径
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# 导入配置
-try:
-    from config import BAIDU_API_KEY, SENIVERSE_API_KEY, SUPPORTED_CITIES, DEFAULT_CITY
-except ImportError:
-    # 如果配置文件不存在，使用默认值
-    BAIDU_API_KEY = "WC6s35CQwWvjpg5txGj20ricDgPLp2US"
-    SENIVERSE_API_KEY = "SEH8S1zMkjgD49Bsi"
-    SUPPORTED_CITIES = ["北京", "上海", "广州", "深圳", "杭州", "南京", "武汉", "成都"]
-    DEFAULT_CITY = "北京"
 
 # 设置页面
 st.set_page_config(
@@ -79,6 +64,7 @@ FEATURE_RANGES = {
     'RELATIVE_HUMIDITY': (15, 100)
 }
 
+
 # 定义优化的Transformer模型结构
 class OptimizedTransformerClassifier(nn.Module):
     def __init__(self, input_size, hidden_size, num_classes, num_layers=2, dropout_rate=0.2):
@@ -108,16 +94,17 @@ class OptimizedTransformerClassifier(nn.Module):
         x = self.fc(x)
         return x
 
+
 # 加载模型函数
 @st.cache_resource
 def load_models():
     """加载预训练的模型"""
     try:
         # 加载CatBoost模型
-        catboost_model = joblib.load('CatTrans/catboost_model.pkl')
+        catboost_model = joblib.load('catboost_model.pkl')
 
         # 加载标签编码器
-        label_encoder = joblib.load('CatTrans/label_encoder.pkl')
+        label_encoder = joblib.load('label_encoder.pkl')
 
         # 加载Transformer模型
         transformer_model = OptimizedTransformerClassifier(
@@ -125,7 +112,7 @@ def load_models():
             hidden_size=64,
             num_classes=len(label_encoder.classes_)
         )
-        transformer_model.load_state_dict(torch.load('CatTrans/transformer_model.pth', map_location='cpu'))
+        transformer_model.load_state_dict(torch.load('transformer_model.pth', map_location='cpu'))
         transformer_model.eval()
 
         return catboost_model, transformer_model, label_encoder
@@ -133,6 +120,7 @@ def load_models():
         st.error(f"❌ 模型加载失败: {str(e)}")
         st.info("请确保以下文件在当前目录中：catboost_model.pkl, transformer_model.pth, label_encoder.pkl")
         return None, None, None
+
 
 # 输入验证函数
 def validate_input_features(soil_ph, temp, humidity, n, p, k):
@@ -161,185 +149,128 @@ def validate_input_features(soil_ph, temp, humidity, n, p, k):
 
     return errors
 
-# 天气功能模块
-def get_weather_location():
-    """使用百度地图API获取当前位置"""
-    try:
-        url = f"https://api.map.baidu.com/location/ip?ak={BAIDU_API_KEY}&coor=bd09ll"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        
-        if data.get('status') == 0 and data.get('content'):
-            # 尝试获取城市信息，如果失败则使用默认城市
-            city = data['content'].get('address_detail', {}).get('city')
-            if city:
-                # 清理城市名称，去除"市"字后缀
-                clean_city = city.replace('市', '').strip()
-                
-                # 检查清理后的城市是否在支持列表中
-                if clean_city in SUPPORTED_CITIES:
-                    st.success(f"✅ 定位成功：{clean_city}")
-                    return clean_city
-                else:
-                    st.warning(f"📍 定位到 {city}，但不在支持列表中")
-                    st.info(f"💡 使用默认城市：{DEFAULT_CITY}")
-                    return DEFAULT_CITY
-            else:
-                # 如果无法获取城市，返回默认城市
-                st.warning(f"📍 无法自动定位，使用默认城市：{DEFAULT_CITY}")
-                return DEFAULT_CITY
-        else:
-            st.warning(f"📍 定位服务异常，使用默认城市：{DEFAULT_CITY}")
-            return DEFAULT_CITY
-    except Exception as e:
-        st.warning(f"📍 定位失败: {str(e)}，使用默认城市：{DEFAULT_CITY}")
-        return DEFAULT_CITY
 
-def get_weather_location_backup():
-    """备用定位方案 - 使用简单的IP查询"""
+# 天气功能模块
+SENIVERSE_KEY = "SEH8S1zMkjgD49Bsi"
+
+def make_api_request(url):
+    """通用的API请求函数"""
     try:
-        # 使用简单的IP定位服务作为备用
-        response = requests.get('https://ipapi.co/json/', timeout=5)
-        data = response.json()
-        
-        if data.get('country') == 'CN':
-            city = data.get('city')
-            if city and city in SUPPORTED_CITIES:
-                st.success(f"✅ 备用定位成功：{city}")
-                return city
-            else:
-                st.warning(f"📍 备用定位到 {city}，但不在支持列表中")
-                return DEFAULT_CITY
-        else:
-            st.warning("📍 备用定位显示您不在国内")
-            return DEFAULT_CITY
+        response = requests.get(url, timeout=10)
+        return response.json()
     except:
-        return DEFAULT_CITY
+        return None
+
+def get_weather_location():
+    """使用ipinfo.io API获取当前位置"""
+    try:
+        url = "https://ipinfo.io/json"
+        data = make_api_request(url)
+        
+        if data and 'city' in data:
+            return data.get('city', '未知城市')
+        else:
+            return None
+    except:
+        return None
+
+def get_weather_data(city_name):
+    """一次性获取所有天气数据，避免重复API调用"""
+    # 使用同一个API获取天气和预报数据
+    url = f"https://api.seniverse.com/v3/weather/daily.json?key={SENIVERSE_KEY}&location={city_name}&language=zh-Hans&unit=c&days=3"
+    weather_data = make_api_request(url)
+    
+    if not weather_data or not weather_data.get('results'):
+        return None, None, None
+    
+    result = weather_data['results'][0]
+    daily_forecasts = result['daily']
+    location = result['location']['name']
+    
+    # 当前天气（今天的数据）
+    today_weather = daily_forecasts[0]
+    current_weather = {
+        'location': location,
+        'temperature_low': today_weather['low'],
+        'temperature_high': today_weather['high'],
+        'text_day': today_weather['text_day'],
+        'text_night': today_weather['text_night'],
+        'wind_direction': today_weather.get('wind_direction', '未知'),
+        'wind_speed': today_weather.get('wind_speed', '未知'),
+        'humidity': today_weather.get('humidity', '未知')
+    }
+    
+    # 3天预报
+    forecasts = []
+    weekday = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+    
+    for i, day in enumerate(daily_forecasts):
+        date = datetime.strptime(day['date'], '%Y-%m-%d')
+        
+        if i == 0:
+            day_label = "今天"
+        elif i == 1:
+            day_label = "明天"
+        else:
+            day_label = weekday[date.weekday()]
+        
+        forecasts.append({
+            'day_label': day_label,
+            'date': day['date'],
+            'low': day['low'],
+            'high': day['high'],
+            'text_day': day['text_day'],
+            'text_night': day['text_night'],
+            'wind_direction': day.get('wind_direction', '未知'),
+            'wind_speed': day.get('wind_speed', '未知'),
+            'humidity': day.get('humidity', '未知')
+        })
+    
+    # 获取天气指数
+    indices_url = f"https://api.seniverse.com/v3/life/suggestion.json?key={SENIVERSE_KEY}&location={city_name}&language=zh-Hans"
+    indices_data = make_api_request(indices_url)
+    
+    indices = None
+    if indices_data and indices_data.get('results'):
+        suggestions = indices_data['results'][0]['suggestion']
+        index_mapping = {
+            'air_condition': '空调指数',
+            'car_washing': '洗车指数',
+            'cold': '感冒指数',
+            'comfort': '舒适度指数',
+            'dress': '穿衣指数',
+            'exercise': '运动指数',
+            'travel': '旅游指数',
+            'uv': '紫外线指数'
+        }
+        
+        indices = []
+        for key, suggestion in suggestions.items():
+            index_name = index_mapping.get(key, key)
+            if suggestion and 'brief' in suggestion and 'details' in suggestion:
+                indices.append({
+                    'name': index_name,
+                    'brief': suggestion['brief'],
+                    'details': suggestion['details']
+                })
+    
+    return current_weather, indices if indices else None, forecasts
 
 def get_current_weather(city_name):
-    """获取当前天气"""
-    try:
-        # 使用3天预报API获取今天的详细信息
-        url = f"https://api.seniverse.com/v3/weather/daily.json?key={SENIVERSE_API_KEY}&location={city_name}&language=zh-Hans&unit=c&days=3"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        
-        if data.get('results'):
-            daily_forecasts = data['results'][0]['daily']
-            location = data['results'][0]['location']['name']
-            
-            # 获取今天的数据（第一条记录）
-            today_weather = daily_forecasts[0]
-            
-            return {
-                'location': location,
-                'temperature_low': today_weather['low'],
-                'temperature_high': today_weather['high'],
-                'text_day': today_weather['text_day'],
-                'text_night': today_weather['text_night'],
-                'wind_direction': today_weather.get('wind_direction', '未知'),
-                'wind_speed': today_weather.get('wind_speed', '未知'),
-                'humidity': today_weather.get('humidity', '未知')
-            }
-        else:
-            st.error(f"❌ 无法获取 {city_name} 的天气数据")
-            return None
-    except requests.exceptions.Timeout:
-        st.error("❌ 天气API请求超时，请稍后重试")
-        return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"❌ 网络请求失败: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"❌ 获取天气数据失败: {str(e)}")
-        return None
+    """获取当前天气（保持向后兼容）"""
+    current_weather, _, _ = get_weather_data(city_name)
+    return current_weather
 
 def get_weather_indices(city_name):
-    """获取天气指数"""
-    try:
-        url = f"https://api.seniverse.com/v3/life/suggestion.json?key={SENIVERSE_API_KEY}&location={city_name}&language=zh-Hans"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        
-        if data.get('results'):
-            suggestions = data['results'][0]['suggestion']
-            
-            index_mapping = {
-                'air_condition': '空调指数',
-                'car_washing': '洗车指数',
-                'cold': '感冒指数',
-                'comfort': '舒适度指数',
-                'dress': '穿衣指数',
-                'exercise': '运动指数',
-                'travel': '旅游指数',
-                'uv': '紫外线指数'
-            }
-            
-            indices = []
-            for key, suggestion in suggestions.items():
-                index_name = index_mapping.get(key, key)
-                # 确保所有字段都存在且不为空
-                if suggestion and 'brief' in suggestion and 'details' in suggestion:
-                    indices.append({
-                        'name': index_name,
-                        'brief': suggestion['brief'],
-                        'details': suggestion['details']
-                    })
-            
-            return indices if indices else None
-        else:
-            return None
-    except requests.exceptions.Timeout:
-        return None
-    except requests.exceptions.RequestException:
-        return None
-    except Exception as e:
-        print(f"获取天气指数错误: {e}")
-        return None
+    """获取天气指数（保持向后兼容）"""
+    _, indices, _ = get_weather_data(city_name)
+    return indices
 
 def get_weekly_forecast(city_name):
-    """获取3天天气预报"""
-    try:
-        url = f"https://api.seniverse.com/v3/weather/daily.json?key={SENIVERSE_API_KEY}&location={city_name}&language=zh-Hans&unit=c&days=3"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        
-        if data.get('results'):
-            daily_forecasts = data['results'][0]['daily']
-            
-            forecasts = []
-            for i, day in enumerate(daily_forecasts):
-                date = datetime.strptime(day['date'], '%Y-%m-%d')
-                weekday = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][date.weekday()]
-                
-                if i == 0:
-                    day_label = "今天"
-                elif i == 1:
-                    day_label = "明天"
-                else:
-                    day_label = weekday
-                
-                forecasts.append({
-                    'day_label': day_label,
-                    'date': day['date'],
-                    'low': day['low'],
-                    'high': day['high'],
-                    'text_day': day['text_day'],
-                    'text_night': day['text_night'],
-                    'wind_direction': day.get('wind_direction', '未知'),
-                    'wind_speed': day.get('wind_speed', '未知'),
-                    'humidity': day.get('humidity', '未知')
-                })
-            
-            return forecasts
-        else:
-            return None
-    except requests.exceptions.Timeout:
-        return None
-    except requests.exceptions.RequestException:
-        return None
-    except:
-        return None
+    """获取3天天气预报（保持向后兼容）"""
+    _, _, forecasts = get_weather_data(city_name)
+    return forecasts
+
 
 # 预测函数
 def recommend_crops(soil_ph, temp, humidity, n, p, k, top_k=3):
@@ -381,17 +312,48 @@ def recommend_crops(soil_ph, temp, humidity, n, p, k, top_k=3):
     except Exception as e:
         return [{'error': f'预测过程中出现错误: {str(e)}'}]
 
+
 # 侧边栏导航
 with st.sidebar:
     st.header("🌱 智能农业助手")
     
-    # 页面选择
-    page = st.selectbox(
-        "选择功能页面",
-        ["🌿 作物推荐", "🌤️ 天气预报"],
-        index=0
+    # 初始化页面状态
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = "🌿 作物推荐"
+    if 'last_page' not in st.session_state:
+        st.session_state.last_page = None
+    
+    page = st.session_state.current_page
+    
+    # 页面选择按钮
+    st.markdown("### 📋 选择功能")
+    
+    # 作物推荐按钮
+    crop_btn = st.button(
+        "🌿 作物推荐",
+        use_container_width=True,
+        type="primary" if page == "🌿 作物推荐" else "secondary"
     )
     
+    # 天气预报按钮
+    weather_btn = st.button(
+        "🌤️ 天气预报", 
+        use_container_width=True,
+        type="primary" if page == "🌤️ 天气预报" else "secondary"
+    )
+    
+    # 处理按钮点击
+    if crop_btn:
+        st.session_state.current_page = "🌿 作物推荐"
+        st.rerun()
+    elif weather_btn:
+        st.session_state.current_page = "🌤️ 天气预报"
+        # 点击天气预报按钮时清除天气数据缓存，强制刷新
+        if 'weather_data' in st.session_state:
+            del st.session_state.weather_data
+        st.rerun()
+    
+    st.markdown("---")
     st.header("ℹ️ 系统信息")
     if page == "🌿 作物推荐":
         st.markdown("""
@@ -553,7 +515,7 @@ else:
     # 天气预报页面
     st.markdown('<div class="main-header">🌤️ 天气预报系统</div>', unsafe_allow_html=True)
     st.markdown("""
-    **基于百度地图定位 + 心知天气API的智能天气预报系统**
+    **基于ipinfo.io定位 + 心知天气API的智能天气预报系统**
     
     自动获取当前位置，提供实时天气信息、生活指数建议和3天天气预报。
     """)
@@ -561,67 +523,174 @@ else:
     # 城市选择功能
     st.header("📍 城市选择")
     
-    # 使用列布局让搜索框和按钮对齐
-    col1, col2 = st.columns([3, 2])
+    # 城市列表（全国所有城市）
+    cities = [
+        # 直辖市
+        "北京", "上海", "天津", "重庆",
+        
+        # 河北省
+        "石家庄", "唐山", "秦皇岛", "邯郸", "邢台", "保定", "张家口", "承德", "沧州", "廊坊", "衡水",
+        
+        # 山西省
+        "太原", "大同", "阳泉", "长治", "晋城", "朔州", "晋中", "运城", "忻州", "临汾", "吕梁",
+        
+        # 内蒙古自治区
+        "呼和浩特", "包头", "乌海", "赤峰", "通辽", "鄂尔多斯", "呼伦贝尔", "巴彦淖尔", "乌兰察布",
+        
+        # 辽宁省
+        "沈阳", "大连", "鞍山", "抚顺", "本溪", "丹东", "锦州", "营口", "阜新", "辽阳", "盘锦", "铁岭", "朝阳", "葫芦岛",
+        
+        # 吉林省
+        "长春", "吉林", "四平", "辽源", "通化", "白山", "松原", "白城", "延边",
+        
+        # 黑龙江省
+        "哈尔滨", "齐齐哈尔", "鸡西", "鹤岗", "双鸭山", "大庆", "伊春", "佳木斯", "七台河", "牡丹江", "黑河", "绥化", "大兴安岭",
+        
+        # 江苏省
+        "南京", "无锡", "徐州", "常州", "苏州", "南通", "连云港", "淮安", "盐城", "扬州", "镇江", "泰州", "宿迁",
+        
+        # 浙江省
+        "杭州", "宁波", "温州", "嘉兴", "湖州", "绍兴", "金华", "衢州", "舟山", "台州", "丽水",
+        
+        # 安徽省
+        "合肥", "芜湖", "蚌埠", "淮南", "马鞍山", "淮北", "铜陵", "安庆", "黄山", "滁州", "阜阳", "宿州", "六安", "亳州", "池州", "宣城",
+        
+        # 福建省
+        "福州", "厦门", "莆田", "三明", "泉州", "漳州", "南平", "龙岩", "宁德",
+        
+        # 江西省
+        "南昌", "景德镇", "萍乡", "九江", "新余", "鹰潭", "赣州", "吉安", "宜春", "抚州", "上饶",
+        
+        # 山东省
+        "济南", "青岛", "淄博", "枣庄", "东营", "烟台", "潍坊", "济宁", "泰安", "威海", "日照", "莱芜", "临沂", "德州", "聊城", "滨州", "菏泽",
+        
+        # 河南省
+        "郑州", "开封", "洛阳", "平顶山", "安阳", "鹤壁", "新乡", "焦作", "濮阳", "许昌", "漯河", "三门峡", "南阳", "商丘", "信阳", "周口", "驻马店",
+        
+        # 湖北省
+        "武汉", "黄石", "十堰", "宜昌", "襄阳", "鄂州", "荆门", "孝感", "荆州", "黄冈", "咸宁", "随州", "恩施",
+        
+        # 湖南省
+        "长沙", "株洲", "湘潭", "衡阳", "邵阳", "岳阳", "常德", "张家界", "益阳", "郴州", "永州", "怀化", "娄底", "湘西",
+        
+        # 广东省
+        "广州", "深圳", "珠海", "汕头", "韶关", "佛山", "江门", "湛江", "茂名", "肇庆", "惠州", "梅州", "汕尾", "河源", "阳江", "清远", "东莞", "中山", "潮州", "揭阳", "云浮",
+        
+        # 广西壮族自治区
+        "南宁", "柳州", "桂林", "梧州", "北海", "防城港", "钦州", "贵港", "玉林", "百色", "贺州", "河池", "来宾", "崇左",
+        
+        # 海南省
+        "海口", "三亚", "三沙", "儋州", "五指山", "文昌", "琼海", "万宁", "东方", "定安", "屯昌", "澄迈", "临高", "白沙", "昌江", "乐东", "陵水", "保亭", "琼中",
+        
+        # 四川省
+        "成都", "自贡", "攀枝花", "泸州", "德阳", "绵阳", "广元", "遂宁", "内江", "乐山", "南充", "眉山", "宜宾", "广安", "达州", "雅安", "巴中", "资阳", "阿坝", "甘孜", "凉山",
+        
+        # 贵州省
+        "贵阳", "六盘水", "遵义", "安顺", "毕节", "铜仁", "黔西南", "黔东南", "黔南",
+        
+        # 云南省
+        "昆明", "曲靖", "玉溪", "保山", "昭通", "丽江", "普洱", "临沧", "楚雄", "红河", "文山", "西双版纳", "大理", "德宏", "怒江", "迪庆",
+        
+        # 西藏自治区
+        "拉萨", "日喀则", "昌都", "林芝", "山南", "那曲", "阿里",
+        
+        # 陕西省
+        "西安", "铜川", "宝鸡", "咸阳", "渭南", "延安", "汉中", "榆林", "安康", "商洛",
+        
+        # 甘肃省
+        "兰州", "嘉峪关", "金昌", "白银", "天水", "武威", "张掖", "平凉", "酒泉", "庆阳", "定西", "陇南", "临夏", "甘南",
+        
+        # 青海省
+        "西宁", "海东", "海北", "黄南", "海南", "果洛", "玉树", "海西",
+        
+        # 宁夏回族自治区
+        "银川", "石嘴山", "吴忠", "固原", "中卫",
+        
+        # 新疆维吾尔自治区
+        "乌鲁木齐", "克拉玛依", "吐鲁番", "哈密", "昌吉", "博尔塔拉", "巴音郭楞", "阿克苏", "克孜勒苏", "喀什", "和田", "伊犁", "塔城", "阿勒泰",
+        
+        # 特别行政区
+        "香港", "澳门",
+        
+        # 台湾省
+        "台北", "高雄", "台中", "台南", "新竹", "基隆", "嘉义", "宜兰", "桃园", "新北", "台东", "花莲", "彰化", "云林", "屏东", "苗栗", "南投", "澎湖", "金门", "马祖"
+    ]
+    
+    # 创建两列布局，调整对齐
+    col1, col2 = st.columns([2, 1])
     
     with col1:
-        # 创建带搜索的城市选择器
+        # 城市选择框
         selected_city = st.selectbox(
-            "🔍 选择或搜索城市",
-            options=SUPPORTED_CITIES,
-            index=SUPPORTED_CITIES.index(DEFAULT_CITY) if DEFAULT_CITY in SUPPORTED_CITIES else 0,
-            help="开始输入城市名称进行搜索，或从下拉列表中选择",
-            key="city_selector"
+            "选择城市：",
+            options=cities,
+            index=0,
+            key="city_selector",
+            help=f"共 {len(cities)} 个城市可选"
         )
     
     with col2:
-        # 添加垂直对齐的容器
-        st.markdown('<div style="padding-top: 28px;">', unsafe_allow_html=True)
-        refresh_weather = st.button(
-            "🔄 刷新天气信息(自动定位)",
-            type="primary",
-            use_container_width=True,
-            help="刷新天气信息并自动定位到当前位置"
-        )
-        st.markdown('</div>', unsafe_allow_html=True)
+        # 定位并刷新按钮，垂直居中对齐
+        st.markdown("<br>", unsafe_allow_html=True)  # 添加一些垂直间距
+        refresh_weather = st.button("🔄 定位并刷新", use_container_width=True)
     
-    # 添加搜索提示
-    st.caption("💡 提示：点击下拉框后输入城市名称可快速搜索")
+    # 获取天气数据
+    should_refresh = refresh_weather or 'weather_data' not in st.session_state
     
-    # 如果点击刷新按钮，则自动定位并获取天气
-    if refresh_weather:
+    # 检查是否需要刷新（页面切换时自动刷新）
+    if page == "🌤️ 天气预报":
+        # 每次进入天气预报页面都强制刷新
+        if 'weather_data' not in st.session_state:
+            should_refresh = True
+        elif 'last_page' in st.session_state and st.session_state.last_page != "🌤️ 天气预报":
+            # 从其他页面（如作物推荐）切换过来，强制刷新
+            should_refresh = True
+            # 清除旧数据确保重新获取
+            if 'weather_data' in st.session_state:
+                del st.session_state.weather_data
+    
+    # 记录当前页面（在检查之后）
+    st.session_state.last_page = page
+    
+    if should_refresh:
         with st.spinner('🌍 正在获取位置和天气信息...'):
-            # 自动获取位置
-            located_city = get_weather_location()
-            if located_city and located_city in SUPPORTED_CITIES:
-                selected_city = located_city
-            elif located_city and located_city == DEFAULT_CITY:
-                selected_city = DEFAULT_CITY
+            # 自动定位
+            current_city = get_weather_location()
+            if current_city:
+                st.success(f"自动定位成功：{current_city}")
             else:
-                # 尝试备用定位方案
-                st.info("🔄 尝试备用定位方案...")
-                backup_city = get_weather_location_backup()
-                if backup_city and backup_city in SUPPORTED_CITIES:
-                    selected_city = backup_city
-                else:
-                    selected_city = DEFAULT_CITY
-    
-    if refresh_weather or 'weather_data' not in st.session_state or st.session_state.get('selected_city') != selected_city:
-        with st.spinner('🌍 正在获取天气信息...'):
-            # 获取天气数据
-            current_weather = get_current_weather(selected_city)
-            weather_indices = get_weather_indices(selected_city)
-            weekly_forecast = get_weekly_forecast(selected_city)
+                st.warning("自动定位失败，使用选择城市")
+                current_city = selected_city
             
-            # 存储到session state
+            if current_city:
+                # 一次性获取所有天气数据
+                current_weather, weather_indices, weekly_forecast = get_weather_data(current_city)
+                
+                # 存储到session state
+                st.session_state.weather_data = {
+                    'city': current_city,
+                    'current': current_weather,
+                    'indices': weather_indices,
+                    'forecast': weekly_forecast,
+                    'last_update': datetime.now()
+                }
+            else:
+                st.error("❌ 无法获取天气信息，请检查网络连接")
+                st.session_state.weather_data = None
+    elif selected_city != st.session_state.weather_data.get('city', '') and st.session_state.weather_data:
+        # 如果选择了不同的城市，更新天气数据
+        with st.spinner('🌍 正在获取天气信息...'):
+            current_city = selected_city
+            # 一次性获取所有天气数据
+            current_weather, weather_indices, weekly_forecast = get_weather_data(current_city)
+            
             st.session_state.weather_data = {
-                'city': selected_city,
+                'city': current_city,
                 'current': current_weather,
                 'indices': weather_indices,
                 'forecast': weekly_forecast,
                 'last_update': datetime.now()
             }
-            st.session_state.selected_city = selected_city
     
     # 显示天气信息
     if st.session_state.weather_data:
@@ -684,8 +753,6 @@ else:
                     <p><strong>💧 湿度：</strong>{day['humidity']}%</p>
                 </div>
                 """, unsafe_allow_html=True)
-    else:
-        st.error("❌ 无法获取天气数据，请稍后重试")
 
 # 页脚
 st.markdown("---")
