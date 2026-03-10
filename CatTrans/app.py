@@ -98,13 +98,61 @@ class OptimizedTransformerClassifier(nn.Module):
 # 加载模型函数
 @st.cache_resource
 def load_models():
-    """加载预训练的模型"""
+    """加载预训练的模型 - 部署安全版本"""
     try:
+        import os
+        import sys
+        
+        # 获取当前文件所在目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 构建模型文件的完整路径
+        catboost_path = os.path.join(current_dir, 'catboost_model.pkl')
+        transformer_path = os.path.join(current_dir, 'transformer_model.pth')
+        encoder_path = os.path.join(current_dir, 'label_encoder.pkl')
+        
+        # 调试信息
+        st.write(f"🔍 当前工作目录: {os.getcwd()}")
+        st.write(f"🔍 脚本目录: {current_dir}")
+        st.write(f"🔍 查找CatBoost模型: {catboost_path}")
+        st.write(f"🔍 查找Transformer模型: {transformer_path}")
+        st.write(f"🔍 查找标签编码器: {encoder_path}")
+        
+        # 检查文件是否存在
+        if not os.path.exists(catboost_path):
+            st.error(f"❌ CatBoost模型文件不存在：{catboost_path}")
+            # 尝试在当前目录查找
+            if os.path.exists('catboost_model.pkl'):
+                st.write("✅ 在当前目录找到CatBoost模型")
+                catboost_path = 'catboost_model.pkl'
+            else:
+                return None, None, None
+                
+        if not os.path.exists(transformer_path):
+            st.error(f"❌ Transformer模型文件不存在：{transformer_path}")
+            # 尝试在当前目录查找
+            if os.path.exists('transformer_model.pth'):
+                st.write("✅ 在当前目录找到Transformer模型")
+                transformer_path = 'transformer_model.pth'
+            else:
+                return None, None, None
+                
+        if not os.path.exists(encoder_path):
+            st.error(f"❌ 标签编码器文件不存在：{encoder_path}")
+            # 尝试在当前目录查找
+            if os.path.exists('label_encoder.pkl'):
+                st.write("✅ 在当前目录找到标签编码器")
+                encoder_path = 'label_encoder.pkl'
+            else:
+                return None, None, None
+        
         # 加载CatBoost模型
-        catboost_model = joblib.load('catboost_model.pkl')
+        catboost_model = joblib.load(catboost_path)
+        st.success("✅ CatBoost模型加载成功")
 
         # 加载标签编码器
-        label_encoder = joblib.load('label_encoder.pkl')
+        label_encoder = joblib.load(encoder_path)
+        st.success("✅ 标签编码器加载成功")
 
         # 加载Transformer模型
         transformer_model = OptimizedTransformerClassifier(
@@ -112,13 +160,16 @@ def load_models():
             hidden_size=64,
             num_classes=len(label_encoder.classes_)
         )
-        transformer_model.load_state_dict(torch.load('transformer_model.pth', map_location='cpu'))
+        transformer_model.load_state_dict(torch.load(transformer_path, map_location='cpu'))
         transformer_model.eval()
+        st.success("✅ Transformer模型加载成功")
 
         return catboost_model, transformer_model, label_encoder
+        
     except Exception as e:
         st.error(f"❌ 模型加载失败: {str(e)}")
-        st.info("请确保以下文件在当前目录中：catboost_model.pkl, transformer_model.pth, label_encoder.pkl")
+        st.write(f"🔍 错误详情: {type(e).__name__}")
+        st.info("请检查模型文件是否完整或重新上传")
         return None, None, None
 
 
