@@ -1,0 +1,30 @@
+{
+    "accuracy_top1": {
+        "value": 0.806,
+        "description": "Top-1 准确率"
+    },
+    "accuracy_top3": {
+        "value": 0.9835,
+        "description": "Top-3 准确率"
+    },
+    "f1_macro": {
+        "value": 0.8012,
+        "description": "宏平均 F1-score"
+    },
+    "precision_avg": {
+        "value": 0.8163,
+        "description": "平均精确率（weighted）"
+    },
+    "recall_avg": {
+        "value": 0.806,
+        "description": "平均召回率（weighted）"
+    },
+    "pr_auc_ovr": {
+        "value": 0.8786,
+        "description": "PR-AUC (OvR)"
+    },
+    "inference_time_ms": {
+        "value": 0.03,
+        "description": "单样本推理时间（毫秒）"
+    }
+}
