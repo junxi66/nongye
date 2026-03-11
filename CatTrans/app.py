@@ -111,29 +111,39 @@ def load_models():
         transformer_path = os.path.join(current_dir, 'transformer_model.pth')
         encoder_path = os.path.join(current_dir, 'label_encoder.pkl')
         
+        # 调试信息（仅在开发环境显示）
+        # st.write(f"🔍 当前工作目录: {os.getcwd()}")
+        # st.write(f"🔍 脚本目录: {current_dir}")
+        # st.write(f"🔍 查找CatBoost模型: {catboost_path}")
+        # st.write(f"🔍 查找Transformer模型: {transformer_path}")
+        # st.write(f"🔍 查找标签编码器: {encoder_path}")
+        
         # 检查文件是否存在
         if not os.path.exists(catboost_path):
+            st.error(f"❌ CatBoost模型文件不存在：{catboost_path}")
             # 尝试在当前目录查找
             if os.path.exists('catboost_model.pkl'):
+                st.write("✅ 在当前目录找到CatBoost模型")
                 catboost_path = 'catboost_model.pkl'
             else:
-                st.error("❌ CatBoost模型文件不存在")
                 return None, None, None
                 
         if not os.path.exists(transformer_path):
+            st.error(f"❌ Transformer模型文件不存在：{transformer_path}")
             # 尝试在当前目录查找
             if os.path.exists('transformer_model.pth'):
+                st.write("✅ 在当前目录找到Transformer模型")
                 transformer_path = 'transformer_model.pth'
             else:
-                st.error("❌ Transformer模型文件不存在")
                 return None, None, None
                 
         if not os.path.exists(encoder_path):
+            st.error(f"❌ 标签编码器文件不存在：{encoder_path}")
             # 尝试在当前目录查找
             if os.path.exists('label_encoder.pkl'):
+                st.write("✅ 在当前目录找到标签编码器")
                 encoder_path = 'label_encoder.pkl'
             else:
-                st.error("❌ 标签编码器文件不存在")
                 return None, None, None
         
         # 加载CatBoost模型
@@ -155,6 +165,8 @@ def load_models():
         
     except Exception as e:
         st.error(f"❌ 模型加载失败: {str(e)}")
+        st.write(f"🔍 错误详情: {type(e).__name__}")
+        st.info("请检查模型文件是否完整或重新上传")
         return None, None, None
 
 
@@ -208,30 +220,22 @@ def get_weather_location():
             city = data.get('city', '').strip()
             region = data.get('region', '').strip()
             country = data.get('country', '').strip()
-            ip = data.get('ip', '').strip()
             
             # 严格过滤无效的地理位置
             invalid_locations = [
                 'The Dalles', 'Oregon', 'Washington', 'California', 'Unknown', 
                 '未知城市', '', 'None', 'null', 'N/A', 'Server', 'Cloud',
-                'AWS', 'Google', 'Microsoft', 'Azure', 'Digital Ocean',
-                'Virginia', 'Ohio', 'Frankfurt', 'Ireland', 'Singapore',
-                'Tokyo', 'Sydney', 'São Paulo', 'Mumbai'
+                'AWS', 'Google', 'Microsoft', 'Azure', 'Digital Ocean'
             ]
             
-            # 检查是否为云服务器IP
-            cloud_indicators = [
-                'amazon', 'aws', 'google', 'microsoft', 'azure', 
-                'digitalocean', 'linode', 'vultr', 'cloudflare'
-            ]
-            
-            # 检查IP是否属于云服务商
-            org = data.get('org', '').lower()
-            is_cloud_ip = any(indicator in org for indicator in cloud_indicators)
-            
-            # 如果是云IP或位置无效，使用备用API
-            if is_cloud_ip or city in invalid_locations or len(city) < 2:
-                return get_weather_location_backup()
+            # 如果城市信息无效或过于宽泛，尝试使用region
+            if not city or city in invalid_locations or len(city) < 2:
+                if region and region not in invalid_locations and len(region) >= 2:
+                    city = region
+                elif country and country not in invalid_locations and len(country) >= 2:
+                    city = country
+                else:
+                    return get_weather_location_backup()
             
             # 再次检查最终结果
             if city in invalid_locations or len(city) < 2:
@@ -241,6 +245,7 @@ def get_weather_location():
         else:
             return get_weather_location_backup()
     except Exception as e:
+        st.error(f"获取位置失败: {e}")
         return get_weather_location_backup()
 
 def get_weather_location_backup():
@@ -265,42 +270,26 @@ def get_weather_location_backup():
                     city = data.get('city', '').strip()
                     region = data.get('regionName', '').strip()
                     country = data.get('country', '').strip()
-                    isp = data.get('isp', '').lower()
                 
                 # ipapi.co格式
                 elif 'city' in data and 'region' in data:
                     city = data.get('city', '').strip()
                     region = data.get('region', '').strip()
                     country = data.get('country_name', '').strip()
-                    isp = data.get('org', '').lower()
                 
                 # ipgeolocation.io格式
                 elif 'city' in data and 'state_prov' in data:
                     city = data.get('city', '').strip()
                     region = data.get('state_prov', '').strip()
                     country = data.get('country_name', '').strip()
-                    isp = data.get('org', '').lower()
                 else:
                     continue
                 
                 # 严格过滤无效位置
                 invalid_locations = [
                     'The Dalles', 'Oregon', 'Washington', 'California', 'Unknown',
-                    '未知城市', '', 'None', 'null', 'N/A', 'Server', 'Cloud',
-                    'Virginia', 'Ohio', 'Frankfurt', 'Ireland', 'Singapore'
+                    '未知城市', '', 'None', 'null', 'N/A', 'Server', 'Cloud'
                 ]
-                
-                # 检查是否为云服务商
-                cloud_indicators = [
-                    'amazon', 'aws', 'google', 'microsoft', 'azure', 
-                    'digitalocean', 'linode', 'vultr', 'cloudflare'
-                ]
-                
-                is_cloud_isp = any(indicator in isp for indicator in cloud_indicators)
-                
-                # 如果是云ISP或位置无效，跳过这个API
-                if is_cloud_isp or city in invalid_locations or len(city) < 2:
-                    continue
                 
                 # 优先使用城市，其次是地区，最后是国家
                 if city and city not in invalid_locations and len(city) >= 2:
@@ -313,10 +302,12 @@ def get_weather_location_backup():
             except Exception:
                 continue
         
-        # 所有API都返回云服务器位置，返回默认城市
+        # 所有API都失败，返回默认城市
+        st.warning("所有定位API都失败，使用默认城市：北京")
         return "北京"
         
     except Exception as e:
+        st.warning(f"备用定位也失败，使用默认城市: {e}")
         return "北京"  # 默认城市
 
 def get_weather_data(city_name):
@@ -425,10 +416,23 @@ def recommend_crops(soil_ph, temp, humidity, n, p, k, top_k=3):
     if validation_errors:
         return [{'error': error} for error in validation_errors]
 
-    # 加载模型
-    catboost_model, transformer_model, label_encoder = load_models()
-    if catboost_model is None:
-        return [{'error': '模型加载失败，无法进行预测'}]
+    # 检查模型是否已加载到session_state
+    if 'models' not in st.session_state:
+        catboost_model, transformer_model, label_encoder = load_models()
+        if catboost_model is None:
+            return [{'error': '模型加载失败，无法进行预测'}]
+        # 缓存模型到session_state
+        st.session_state.models = {
+            'catboost': catboost_model,
+            'transformer': transformer_model,
+            'label_encoder': label_encoder
+        }
+    
+    # 从session_state获取模型
+    models = st.session_state.models
+    catboost_model = models['catboost']
+    transformer_model = models['transformer']
+    label_encoder = models['label_encoder']
 
     try:
         # 准备特征
@@ -482,22 +486,22 @@ with st.sidebar:
     
     # 天气预报按钮
     weather_btn = st.button(
-        "🌤️ 天气预报", 
+        "🌤️ 天气预报",
         use_container_width=True,
         type="primary" if page == "🌤️ 天气预报" else "secondary"
     )
-    
+
     # 处理按钮点击
     if crop_btn:
         st.session_state.current_page = "🌿 作物推荐"
         st.rerun()
     elif weather_btn:
         st.session_state.current_page = "🌤️ 天气预报"
-        # 点击天气预报按钮时清除天气数据缓存，强制刷新
-        if 'weather_data' in st.session_state:
-            del st.session_state.weather_data
         st.rerun()
-    
+
+    # 更新page变量，确保与session_state同步
+    page = st.session_state.current_page
+
     st.markdown("---")
     st.header("ℹ️ 系统信息")
     if page == "🌿 作物推荐":
@@ -665,8 +669,12 @@ else:
     自动获取当前位置，提供实时天气信息、生活指数建议和3天天气预报。
     """)
     
+    # 定位刷新按钮
+    st.header("📍 自动定位")
+    refresh_weather = st.button("🔄 刷新天气", use_container_width=True)
+    
     # 城市选择功能
-    st.header("📍 城市选择")
+    st.header("📍 手动选择城市")
     
     # 城市列表（全国所有城市）
     cities = [
@@ -761,26 +769,21 @@ else:
         "台北", "高雄", "台中", "台南", "新竹", "基隆", "嘉义", "宜兰", "桃园", "新北", "台东", "花莲", "彰化", "云林", "屏东", "苗栗", "南投", "澎湖", "金门", "马祖"
     ]
     
-    # 创建两列布局，调整对齐
-    col1, col2 = st.columns([2, 1])
+    # 集成的搜索选择框
+    selected_city = st.selectbox(
+        "🔍 搜索并选择城市",
+        options=cities,
+        index=0,
+        key="city_search_select",
+        help="输入城市名进行搜索，或从下拉列表中选择"
+    )
     
-    with col1:
-        # 城市选择框
-        selected_city = st.selectbox(
-            "选择城市：",
-            options=cities,
-            index=0,
-            key="city_selector",
-            help=f"共 {len(cities)} 个城市可选"
-        )
-    
-    with col2:
-        # 定位并刷新按钮，垂直居中对齐
-        st.markdown("<br>", unsafe_allow_html=True)  # 添加一些垂直间距
-        refresh_weather = st.button("🔄 定位并刷新", use_container_width=True)
+    # 手动获取天气按钮
+    get_weather_btn = st.button("🌤️ 获取选定城市天气", use_container_width=True, type="primary")
     
     # 获取天气数据 - 使用更安全的方式
     refresh_triggered = refresh_weather
+    manual_triggered = get_weather_btn
     
     # 页面切换检测
     if page == "🌤️ 天气预报":
@@ -792,28 +795,28 @@ else:
     # 记录当前页面
     st.session_state.last_page = page
     
-    # 城市变更检测
-    city_changed = False
-    if 'weather_data' in st.session_state and selected_city != st.session_state.weather_data.get('city', ''):
-        city_changed = True
-    
     # 执行天气数据获取
-    if refresh_triggered or city_changed:
+    if refresh_triggered or manual_triggered:
         with st.spinner('🌍 正在获取位置和天气信息...'):
-            if refresh_triggered and not city_changed:
+            # 如果是刷新触发，清除旧的天气数据
+            if refresh_triggered and 'weather_data' in st.session_state:
+                del st.session_state.weather_data
+            
+            # 初始化current_city
+            current_city = None
+            
+            if manual_triggered:
+                # 手动选择城市
+                current_city = selected_city
+                st.info(f"📍 使用手动选择城市：{current_city}")
+            elif refresh_triggered:
                 # 自动定位
                 st.write("🔍 开始自动定位...")
                 current_city = get_weather_location()
                 if current_city:
                     st.success(f"✅ 自动定位成功：{current_city}")
                 else:
-                    st.warning("⚠️ 自动定位失败，使用选择城市")
-                    current_city = selected_city
-                    st.info(f"📍 使用手动选择城市：{current_city}")
-            else:
-                # 使用选择的城市
-                current_city = selected_city
-                st.info(f"📍 使用手动选择城市：{current_city}")
+                    st.warning("⚠️ 自动定位失败，请稍后重试")
             
             if current_city:
                 # 获取天气数据
