@@ -208,22 +208,30 @@ def get_weather_location():
             city = data.get('city', '').strip()
             region = data.get('region', '').strip()
             country = data.get('country', '').strip()
+            ip = data.get('ip', '').strip()
             
             # 严格过滤无效的地理位置
             invalid_locations = [
                 'The Dalles', 'Oregon', 'Washington', 'California', 'Unknown', 
                 '未知城市', '', 'None', 'null', 'N/A', 'Server', 'Cloud',
-                'AWS', 'Google', 'Microsoft', 'Azure', 'Digital Ocean'
+                'AWS', 'Google', 'Microsoft', 'Azure', 'Digital Ocean',
+                'Virginia', 'Ohio', 'Frankfurt', 'Ireland', 'Singapore',
+                'Tokyo', 'Sydney', 'São Paulo', 'Mumbai'
             ]
             
-            # 如果城市信息无效或过于宽泛，尝试使用region
-            if not city or city in invalid_locations or len(city) < 2:
-                if region and region not in invalid_locations and len(region) >= 2:
-                    city = region
-                elif country and country not in invalid_locations and len(country) >= 2:
-                    city = country
-                else:
-                    return get_weather_location_backup()
+            # 检查是否为云服务器IP
+            cloud_indicators = [
+                'amazon', 'aws', 'google', 'microsoft', 'azure', 
+                'digitalocean', 'linode', 'vultr', 'cloudflare'
+            ]
+            
+            # 检查IP是否属于云服务商
+            org = data.get('org', '').lower()
+            is_cloud_ip = any(indicator in org for indicator in cloud_indicators)
+            
+            # 如果是云IP或位置无效，使用备用API
+            if is_cloud_ip or city in invalid_locations or len(city) < 2:
+                return get_weather_location_backup()
             
             # 再次检查最终结果
             if city in invalid_locations or len(city) < 2:
@@ -233,7 +241,6 @@ def get_weather_location():
         else:
             return get_weather_location_backup()
     except Exception as e:
-        st.error(f"获取位置失败: {e}")
         return get_weather_location_backup()
 
 def get_weather_location_backup():
@@ -258,26 +265,42 @@ def get_weather_location_backup():
                     city = data.get('city', '').strip()
                     region = data.get('regionName', '').strip()
                     country = data.get('country', '').strip()
+                    isp = data.get('isp', '').lower()
                 
                 # ipapi.co格式
                 elif 'city' in data and 'region' in data:
                     city = data.get('city', '').strip()
                     region = data.get('region', '').strip()
                     country = data.get('country_name', '').strip()
+                    isp = data.get('org', '').lower()
                 
                 # ipgeolocation.io格式
                 elif 'city' in data and 'state_prov' in data:
                     city = data.get('city', '').strip()
                     region = data.get('state_prov', '').strip()
                     country = data.get('country_name', '').strip()
+                    isp = data.get('org', '').lower()
                 else:
                     continue
                 
                 # 严格过滤无效位置
                 invalid_locations = [
                     'The Dalles', 'Oregon', 'Washington', 'California', 'Unknown',
-                    '未知城市', '', 'None', 'null', 'N/A', 'Server', 'Cloud'
+                    '未知城市', '', 'None', 'null', 'N/A', 'Server', 'Cloud',
+                    'Virginia', 'Ohio', 'Frankfurt', 'Ireland', 'Singapore'
                 ]
+                
+                # 检查是否为云服务商
+                cloud_indicators = [
+                    'amazon', 'aws', 'google', 'microsoft', 'azure', 
+                    'digitalocean', 'linode', 'vultr', 'cloudflare'
+                ]
+                
+                is_cloud_isp = any(indicator in isp for indicator in cloud_indicators)
+                
+                # 如果是云ISP或位置无效，跳过这个API
+                if is_cloud_isp or city in invalid_locations or len(city) < 2:
+                    continue
                 
                 # 优先使用城市，其次是地区，最后是国家
                 if city and city not in invalid_locations and len(city) >= 2:
@@ -290,12 +313,10 @@ def get_weather_location_backup():
             except Exception:
                 continue
         
-        # 所有API都失败，返回默认城市
-        st.warning("所有定位API都失败，使用默认城市：北京")
+        # 所有API都返回云服务器位置，返回默认城市
         return "北京"
         
     except Exception as e:
-        st.warning(f"备用定位也失败，使用默认城市: {e}")
         return "北京"  # 默认城市
 
 def get_weather_data(city_name):
