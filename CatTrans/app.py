@@ -210,43 +210,131 @@ def make_api_request(url):
         return None
 
 def get_weather_location():
-    """使用多个API获取当前位置，提高定位准确性"""
-    # 首先尝试ipinfo.io
-    try:
-        url = "https://ipinfo.io/json"
-        data = make_api_request(url)
+    """使用浏览器地理位置API获取当前位置"""
+    # 使用JavaScript在浏览器端获取地理位置
+    location_script = """
+    <script>
+    function getLocation() {
+        if (navigator.geolocation) {
+            // 显示定位状态
+            console.log('开始获取地理位置...');
+            
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    console.log('定位成功:', position);
+                    // 成功获取位置，发送到Streamlit
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    
+                    // 使用逆地理编码API获取城市名
+                    const apiUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=zh-CN&zoom=10`;
+                    
+                    fetch(apiUrl)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            console.log('逆地理编码结果:', data);
+                            let city = '未知城市';
+                            
+                            if (data && data.address) {
+                                city = data.address.city || 
+                                       data.address.town || 
+                                       data.address.county || 
+                                       data.address.state || 
+                                       data.address.country || 
+                                       '未知城市';
+                            }
+                            
+                            console.log('最终城市名:', city);
+                            
+                            // 将城市名发送到Streamlit
+                            window.parent.postMessage({
+                                type: 'streamlit:setComponentValue',
+                                key: 'browser_location',
+                                value: city
+                            }, '*');
+                        })
+                        .catch(error => {
+                            console.error('逆地理编码失败:', error);
+                            // 逆地理编码失败，但定位成功，使用坐标信息
+                            window.parent.postMessage({
+                                type: 'streamlit:setComponentValue',
+                                key: 'browser_location',
+                                value: `位置获取成功 (${lat.toFixed(4)}, ${lon.toFixed(4)})`
+                            }, '*');
+                        });
+                },
+                function(error) {
+                    console.error('地理位置获取失败:', error);
+                    let errorMsg = '定位失败';
+                    
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            errorMsg = '用户拒绝了定位请求';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            errorMsg = '位置信息不可用';
+                            break;
+                        case error.TIMEOUT:
+                            errorMsg = '定位请求超时';
+                            break;
+                        case error.UNKNOWN_ERROR:
+                            errorMsg = '未知错误';
+                            break;
+                    }
+                    
+                    // 发送错误信息到Streamlit
+                    window.parent.postMessage({
+                        type: 'streamlit:setComponentValue',
+                        key: 'browser_location',
+                        value: `定位失败: ${errorMsg}`
+                    }, '*');
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 15000,  // 增加超时时间
+                    maximumAge: 600000   // 增加缓存时间
+                }
+            );
+        } else {
+            console.error('浏览器不支持地理位置API');
+            window.parent.postMessage({
+                type: 'streamlit:setComponentValue',
+                key: 'browser_location',
+                value: '浏览器不支持地理位置'
+            }, '*');
+        }
+    }
+    
+    // 延迟执行，确保页面完全加载
+    setTimeout(getLocation, 1000);
+    </script>
+    """
+    
+    # 显示定位脚本
+    st.components.v1.html(location_script, height=0)
+    
+    # 创建隐藏组件来接收JavaScript返回的位置
+    browser_location = st.text_input("", key="browser_location", value="")
+    
+    # 如果已经获取到位置，返回城市名
+    if browser_location and browser_location != "":
+        location_result = browser_location.strip()
         
-        if data and 'city' in data:
-            city = data.get('city', '').strip()
-            region = data.get('region', '').strip()
-            country = data.get('country', '').strip()
-            
-            # 严格过滤无效的地理位置
-            invalid_locations = [
-                'The Dalles', 'Oregon', 'Washington', 'California', 'Unknown', 
-                '未知城市', '', 'None', 'null', 'N/A', 'Server', 'Cloud',
-                'AWS', 'Google', 'Microsoft', 'Azure', 'Digital Ocean'
-            ]
-            
-            # 如果城市信息无效或过于宽泛，尝试使用region
-            if not city or city in invalid_locations or len(city) < 2:
-                if region and region not in invalid_locations and len(region) >= 2:
-                    city = region
-                elif country and country not in invalid_locations and len(country) >= 2:
-                    city = country
-                else:
-                    return get_weather_location_backup()
-            
-            # 再次检查最终结果
-            if city in invalid_locations or len(city) < 2:
-                return get_weather_location_backup()
-                
-            return city
+        # 检查是否是错误信息
+        if "定位失败" in location_result or "不支持" in location_result:
+            return None
+        elif "位置获取成功" in location_result:
+            # 如果是坐标信息，返回None让用户手动选择
+            return None
         else:
-            return get_weather_location_backup()
-    except Exception as e:
-        st.error(f"获取位置失败: {e}")
-        return get_weather_location_backup()
+            return location_result
+    else:
+        return None
 
 def get_weather_location_backup():
     """备用定位API - 使用更可靠的服务"""
@@ -796,7 +884,7 @@ else:
     st.session_state.last_page = page
     
     # 执行天气数据获取
-    if refresh_triggered or manual_triggered:
+    if refresh_triggered or get_weather_btn:
         with st.spinner('🌍 正在获取位置和天气信息...'):
             # 如果是刷新触发，清除旧的天气数据
             if refresh_triggered and 'weather_data' in st.session_state:
@@ -805,18 +893,31 @@ else:
             # 初始化current_city
             current_city = None
             
-            if manual_triggered:
+            if get_weather_btn:
                 # 手动选择城市
                 current_city = selected_city
                 st.info(f"📍 使用手动选择城市：{current_city}")
             elif refresh_triggered:
-                # 自动定位
-                st.write("🔍 开始自动定位...")
+                # 浏览器端自动定位
+                st.write("🔍 正在请求浏览器定位权限...")
+                st.write("📍 请在浏览器弹窗中允许获取位置信息")
+                st.info("💡 如果浏览器定位失败，将自动使用IP定位作为备用方案")
+                
+                # 调用浏览器定位函数
                 current_city = get_weather_location()
+                
                 if current_city:
-                    st.success(f"✅ 自动定位成功：{current_city}")
+                    st.success(f"✅ 浏览器定位成功：{current_city}")
                 else:
-                    st.warning("⚠️ 自动定位失败，请稍后重试")
+                    st.warning("⚠️ 浏览器定位失败，正在尝试IP定位...")
+                    # 使用备用IP定位
+                    current_city = get_weather_location_backup()
+                    if current_city and current_city != "北京":
+                        st.success(f"✅ IP定位成功：{current_city}")
+                    else:
+                        st.warning("⚠️ 自动定位失败，请手动选择城市")
+                        # 不继续获取天气数据，直接跳到显示部分
+                        st.stop()
             
             if current_city:
                 # 获取天气数据
