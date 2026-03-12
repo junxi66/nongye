@@ -778,6 +778,9 @@ else:
         help="输入城市名进行搜索，或从下拉列表中选择"
     )
     
+    # 提示文字
+    st.markdown('<small style="color: #666; font-style: italic;">💡 当无法自动定位时可选择手动添加城市天气</small>', unsafe_allow_html=True)
+    
     # 手动获取天气按钮
     get_weather_btn = st.button("🌤️ 获取选定城市天气", use_container_width=True, type="primary")
     
