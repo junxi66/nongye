@@ -111,12 +111,7 @@ def load_models():
         transformer_path = os.path.join(current_dir, 'transformer_model.pth')
         encoder_path = os.path.join(current_dir, 'label_encoder.pkl')
         
-        # 调试信息（仅在开发环境显示）
-        # st.write(f"🔍 当前工作目录: {os.getcwd()}")
-        # st.write(f"🔍 脚本目录: {current_dir}")
-        # st.write(f"🔍 查找CatBoost模型: {catboost_path}")
-        # st.write(f"🔍 查找Transformer模型: {transformer_path}")
-        # st.write(f"🔍 查找标签编码器: {encoder_path}")
+
         
         # 检查文件是否存在
         if not os.path.exists(catboost_path):
@@ -211,7 +206,7 @@ def make_api_request(url):
 
 def get_weather_location():
     """使用多个API获取当前位置，提高定位准确性"""
-    # 首先尝试ipinfo.io
+   
     try:
         url = "https://ipinfo.io/json"
         data = make_api_request(url)
@@ -251,7 +246,7 @@ def get_weather_location():
 def get_weather_location_backup():
     """备用定位API - 使用更可靠的服务"""
     try:
-        # 尝试多个备用API
+        # 使用多个备用API
         apis = [
             "http://ip-api.com/json/",
             "https://ipapi.co/json/",
